@@ -425,6 +425,14 @@ function clientGetAllTasks() {
   }, this, 'clientGetAllTasks');
 }
 
+function clientGetComplianceMatrixData(timeframe, statusFilter, categoryFilter) {
+  return executeWithErrorHandling(function() {
+    requireSupervisor();
+    var managedLdaps = getManagedLdaps(getCurrentLdap());
+    return getComplianceMatrixData(managedLdaps, timeframe, statusFilter, categoryFilter);
+  }, this, 'clientGetComplianceMatrixData');
+}
+
 // --- Concerns ---
 function clientSubmitConcern(concernData) {
   return executeWithErrorHandling(function() {

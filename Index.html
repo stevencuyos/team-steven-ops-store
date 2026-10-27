@@ -116,6 +116,11 @@
         <span>Task Manager</span>
       </div>
 
+      <div class="nav-item" data-view="compliance-matrix" onclick="navigate('compliance-matrix')">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 3v18h18V3H3zm16 16H5V5h14v14zM7 11h10v2H7zm0 4h10v2H7zm0-8h10v2H7z"/></svg>
+        <span>Compliance Matrix</span>
+      </div>
+
       <div class="nav-item" data-view="kudos-queue" onclick="navigate('kudos-queue')">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-2.18c.07-.44.18-.88.18-1.34C18 2.54 16.5 1 14.67 1c-1.12 0-2.08.56-2.67 1.39L12 3l-.67-.95C10.75 1.25 9.73.85 8.6 1 6.9 1.24 5.65 2.88 5.65 4.66 5.65 5.12 5.76 5.56 5.83 6H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-8 12H6v-2h6v2zm0-4H6v-2h6v2zm0-4H6V8h6v2zm0-4H8.93c-.34 0-.62-.21-.74-.52-.25-.66.19-1.31.88-1.35.42-.02.8.19 1 .52l.93 1.35zm6 12h-4v-6h4v6zm0-8h-4V8h4v2zm0-4h-.93L14 5.85c.2-.33.58-.54 1-.52.69.04 1.13.69.88 1.35-.12.31-.4.52-.74.52H10.07z"/></svg>
         <span>Kudos Queue</span>
@@ -617,6 +622,7 @@
       <div class="view" id="view-notifications"></div>
       <div class="view" id="view-task-detail"></div>
       <div class="view" id="view-task-manager"></div>
+      <div class="view" id="view-compliance-matrix"></div>
       <div class="view" id="view-kudos-queue"></div>
       <div class="view" id="view-demerit-entry"></div>
       <div class="view" id="view-analytics"></div>
@@ -775,6 +781,7 @@ var VIEW_TITLES = {
   'notifications': 'Notifications',
   'task-detail':   'Task Details',
   'task-manager':  'Task Manager',
+  'compliance-matrix': 'Compliance Matrix',
   'kudos-queue':   'Kudos Queue',
   'demerit-entry': 'Demerit Entry',
   'analytics':     'Team Analytics',
@@ -1082,6 +1089,7 @@ function renderView(view, data) {
       case 'notifications': renderNotificationsPage(); break;
       case 'task-detail':   renderTaskDetail(data); break;
       case 'task-manager':  renderTaskManager(); break;
+      case 'compliance-matrix': renderComplianceMatrix(); break;
       case 'kudos-queue':   renderKudosQueue(); break;
       case 'demerit-entry': renderDemeritEntry(); break;
       case 'analytics':     renderAnalytics(); break;
@@ -2744,6 +2752,124 @@ function handleModalEsc(e) {
     document.querySelectorAll('.modal-overlay.open').forEach(function(m) { m.classList.remove('open'); });
     document.removeEventListener('keydown', handleModalEsc);
   }
+}
+function renderComplianceMatrix() {
+  if (!APP.session || (APP.session.role !== 'manager' && APP.session.role !== 'supervisor')) {
+    document.getElementById('view-compliance-matrix').innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔒</div><h3>Access Denied</h3></div>';
+    return;
+  }
+
+  if (!APP.state.complianceFilters) {
+    APP.state.complianceFilters = { timeframe: 'month', status: 'all', category: 'all' };
+  }
+
+  setLoading('compliance-matrix', 'Loading compliance data...');
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      if (result && result.success) {
+        buildComplianceMatrixHtml(result);
+      } else {
+        document.getElementById('view-compliance-matrix').innerHTML = '<div class="empty-state"><h3>Error loading matrix</h3><p>' + (result.error || 'Unknown error') + '</p></div>';
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('view-compliance-matrix').innerHTML = '<div class="empty-state"><div class="empty-state-icon">⚠️</div><h3>Error loading matrix</h3><p>' + ((err && err.message) || 'Unknown error') + '</p></div>';
+    })
+    .clientGetComplianceMatrixData(
+      APP.state.complianceFilters.timeframe,
+      APP.state.complianceFilters.status,
+      APP.state.complianceFilters.category
+    );
+}
+
+function updateComplianceMatrixFilter(type, value) {
+  if (!APP.state.complianceFilters) return;
+  APP.state.complianceFilters[type] = value;
+  renderComplianceMatrix();
+}
+
+function buildComplianceMatrixHtml(data) {
+  var el = document.getElementById('view-compliance-matrix');
+  if (!el) return;
+
+  var tasks = data.tasks || [];
+  var matrix = data.matrix || [];
+
+  // Collect all unique categories from tasks to build the category filter dropdown
+  var allCategories = new Set();
+  tasks.forEach(function(t) { if (t.category) allCategories.add(t.category); });
+  var catOptionsHtml = '<option value="all">All Categories</option>';
+  allCategories.forEach(function(c) {
+    var sel = (APP.state.complianceFilters.category === c) ? 'selected' : '';
+    catOptionsHtml += '<option value="' + escHtml(c) + '" ' + sel + '>' + escHtml(c) + '</option>';
+  });
+
+  var headerHtml = '<div class="section-header mb-16"><div class="section-title">Compliance Matrix</div></div>';
+
+  var filtersHtml = '<div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">' +
+    '<select class="input-field" style="width:200px" onchange="updateComplianceMatrixFilter(\'timeframe\', this.value)">' +
+      '<option value="all" ' + (APP.state.complianceFilters.timeframe==='all'?'selected':'') + '>All Time</option>' +
+      '<option value="today" ' + (APP.state.complianceFilters.timeframe==='today'?'selected':'') + '>Today</option>' +
+      '<option value="week" ' + (APP.state.complianceFilters.timeframe==='week'?'selected':'') + '>This Week</option>' +
+      '<option value="month" ' + (APP.state.complianceFilters.timeframe==='month'?'selected':'') + '>This Month</option>' +
+    '</select>' +
+    '<select class="input-field" style="width:200px" onchange="updateComplianceMatrixFilter(\'status\', this.value)">' +
+      '<option value="all" ' + (APP.state.complianceFilters.status==='all'?'selected':'') + '>All Statuses</option>' +
+      '<option value="active" ' + (APP.state.complianceFilters.status==='active'?'selected':'') + '>Active</option>' +
+      '<option value="completed" ' + (APP.state.complianceFilters.status==='completed'?'selected':'') + '>Completed</option>' +
+      '<option value="expired" ' + (APP.state.complianceFilters.status==='expired'?'selected':'') + '>Expired</option>' +
+    '</select>' +
+    '<select class="input-field" style="width:200px" onchange="updateComplianceMatrixFilter(\'category\', this.value)">' +
+      catOptionsHtml +
+    '</select>' +
+  '</div>';
+
+  if (tasks.length === 0) {
+    el.innerHTML = headerHtml + filtersHtml + '<div class="empty-state"><h3>No tasks match your filters</h3></div>';
+    return;
+  }
+
+  var theadHtml = '<thead><tr><th style="position:sticky;left:0;z-index:2;background:var(--bg-card);min-width:200px;padding:12px 16px;">Agent</th>';
+  tasks.forEach(function(t) {
+    theadHtml += '<th style="min-width:180px;max-width:250px;padding:12px 16px;text-align:center;" title="' + escHtml(t.title) + '">' +
+                 '<div style="font-size:13px;white-space:normal;line-height:1.4;margin-bottom:6px;">' + escHtml(t.title) + '</div>' +
+                 '<div style="font-size:11px;color:var(--text-secondary);font-weight:normal;">Due: ' + escHtml(t.deadline) + '</div>' +
+                 '</th>';
+  });
+  theadHtml += '</tr></thead>';
+
+  var tbodyHtml = '<tbody>';
+  matrix.forEach(function(agentRow) {
+    tbodyHtml += '<tr>';
+    tbodyHtml += '<td style="position:sticky;left:0;background:var(--bg-card);border-right:1px solid var(--border);padding:12px 16px;">' +
+                 '<div style="display:flex;align-items:center;gap:12px;">' +
+                 '<img src="' + escHtml(agentRow.photoUrl) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">' +
+                 '<div><div style="font-weight:600;font-size:14px;color:var(--text-primary);">' + escHtml(agentRow.displayName) + '</div>' +
+                 '<div style="font-size:12px;color:var(--text-secondary);">' + escHtml(agentRow.ldap) + '</div></div>' +
+                 '</div></td>';
+
+    agentRow.tasks.forEach(function(ts) {
+      var badgeClass = '';
+      if (ts.status === 'Completed') badgeClass = 'status-completed';
+      else if (ts.status === 'In Progress') badgeClass = 'status-in-progress';
+      else if (ts.status === 'Missed') badgeClass = 'status-expired';
+      else if (ts.status === 'Available') badgeClass = 'status-available';
+
+      if (ts.status === 'N/A') {
+         tbodyHtml += '<td style="text-align:center;padding:12px 16px;color:var(--text-hint);font-size:13px;">-</td>';
+      } else {
+         tbodyHtml += '<td style="text-align:center;padding:12px 16px;"><span class="status-badge ' + badgeClass + '">' + escHtml(ts.status) + '</span></td>';
+      }
+    });
+    tbodyHtml += '</tr>';
+  });
+  tbodyHtml += '</tbody>';
+
+  var tableHtml = '<div style="overflow-x:auto;padding-bottom:20px;border-radius:8px;border:1px solid var(--border);">' +
+                  '<table class="data-table" style="width:100%;border-collapse:collapse;">' + theadHtml + tbodyHtml + '</table></div>';
+
+  el.innerHTML = headerHtml + filtersHtml + tableHtml;
 }
 document.addEventListener('click', function(e) { if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open'); });
 </script>
